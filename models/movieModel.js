@@ -17,7 +17,7 @@ const db = new Client({
     port: process.env.DO_DOCKER_PORT,
 });
 
-
+//hi
 const minioClient = new Minio.Client({
     endPoint: process.env.DO_SPACES_ENDPOINT,
     useSSL: true,
