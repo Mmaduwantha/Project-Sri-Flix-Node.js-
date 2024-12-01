@@ -1,47 +1,71 @@
 import dotenv from 'dotenv';
 import pg from 'pg';
-import bcrypt, { hash } from 'bcrypt'
+import bcrypt from 'bcrypt';
+import fetch from 'node-fetch';
+
+dotenv.config();
 
 const { Client } = pg;
 const saltRounds = 10;
+
+// Database connection
 const db = new Client({
-    user: 'postgres',
+    user: process.env.DO_USER || 'postgres',
     host: process.env.DO_HOST,
     database: process.env.DO_DB,
     password: process.env.DO_PG_PW,
-    port: process.env.DO_DOCKER_PORT,
+    port: process.env.DO_DOCKER_PORT || 5432,
 });
 
+db.connect().catch(err => {
+    console.error('Error connecting to the database:', err.stack);
+});
 
-dotenv.config();
-db.connect();
-
-
-class userModel{
-    static async getAll(){
-        const result =  await db.query("SELECT * FROM users")
-        return result.rows;
-    }
-    static async checkExist(email){
-        const result = await db.query("SELECT * FROM users WHERE email = $1",[email])
-        if(result.rows.length===0){
-            return false
-        }
-        else{
-            return true
+class UserModel {
+    // Fetch all users
+    static async getAll() {
+        try {
+            const result = await db.query('SELECT * FROM users');
+            return result.rows;
+        } catch (error) {
+            console.error('Error fetching users:', error);
+            throw error;
         }
     }
-    static async getUserHash(email){
-            const result = await db.query("SELECT hash FROM users WHERE email = $1",[email]);
-            return result.rows[0];
+
+    // Check if user exists by email
+    static async checkExist(email) {
+        try {
+            const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+            return result.rows.length > 0;
+        } catch (error) {
+            console.error('Error checking if user exists:', error);
+            throw error;
+        }
     }
-    static async addUser(userName,password,email,role){
+
+    // Fetch hashed password by email
+    static async getUserHash(email) {
+        try {
+            const result = await db.query('SELECT hash FROM users WHERE email = $1', [email]);
+            return result.rows[0]?.hash || null;
+        } catch (error) {
+            console.error('Error fetching user hash:', error);
+            throw error;
+        }
+    }
+
+    // Add a new user
+    static async addUser(userName, password, email, role) {
         try {
             const hash = bcrypt.hashSync(password, saltRounds);
             const checkExist = await this.checkExist(email);
 
             if (!checkExist) {
-                const result = await db.query("INSERT INTO users (username, hash, email, role) VALUES ($1, $2, $3, $4)", [userName, hash, email, role]);
+                const result = await db.query(
+                    'INSERT INTO users (username, hash, email, role) VALUES ($1, $2, $3, $4) RETURNING *',
+                    [userName, hash, email, role]
+                );
                 return result.rows[0];
             } else {
                 console.log('User already exists');
@@ -52,14 +76,21 @@ class userModel{
             throw error;
         }
     }
+
+    // User login
     static async logIn(email, password) {
         try {
             const userExists = await this.checkExist(email);
             if (userExists) {
                 const hash = await this.getUserHash(email);
-                const match = await bcrypt.compare(password, hash.hash);
+                if (!hash) {
+                    console.log('No hash found for user');
+                    return false;
+                }
+
+                const match = await bcrypt.compare(password, hash);
                 if (match) {
-                    console.log(password);
+                    console.log('Password matched');
                     return true;
                 } else {
                     console.log('Password incorrect');
@@ -74,25 +105,40 @@ class userModel{
             throw error;
         }
     }
-    static async isLogged(req){
-        return req.isAuthenticated();
-        
+
+    // Check if the user is logged in
+    static async isLogged(req) {
+        try {
+            return req.isAuthenticated();
+        } catch (error) {
+            console.error('Error checking login status:', error);
+            throw error;
+        }
     }
-    static async count(){
-        const result = await db.query("SELECT * FROM users");
-        return result.rowCount; 
+
+    // Count all users
+    static async count() {
+        try {
+            const result = await db.query('SELECT COUNT(*) FROM users');
+            return parseInt(result.rows[0].count, 10);
+        } catch (error) {
+            console.error('Error counting users:', error);
+            throw error;
+        }
     }
 
-
-    
- static async getUserData(access_token) {
-
-    const response = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${access_token}`);
-    
-    //console.log('response',response);
-    const data = await response.json();
-    console.log('data',data);
-  }
+    // Fetch user data using OAuth2 access token
+    static async getUserData(access_token) {
+        try {
+            const response = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${access_token}`);
+            const data = await response.json();
+            console.log('OAuth2 User Data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching OAuth2 user data:', error);
+            throw error;
+        }
+    }
 }
 
-export default userModel;
+export default UserModel;
